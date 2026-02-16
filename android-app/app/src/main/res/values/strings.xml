@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CloudflareScanner</string>
+    <string name="app_intro">Run the bundled Cloudflare scanner binary on Android.</string>
+    <string name="args_hint">Command arguments</string>
+    <string name="default_args">-dd -p 10</string>
+    <string name="run_scan">Run Scan</string>
+    <string name="output_label">Output</string>
+    <string name="output_placeholder">Tap "Run Scan" to start.</string>
+    <string name="running_message">Running scanner...</string>
+</resources>

@@ -5,100 +5,191 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: write
+
 jobs:
-  build:
-    permissions:
-      contents: write
+  build-cli:
+    name: Build CLI (${{ matrix.goos }}-${{ matrix.goarch }})
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
           - goos: darwin
             goarch: amd64
+            goarm: ""
           - goos: darwin
             goarch: arm64
-            
-          - goos: android
-            goarch: arm64
-            
+            goarm: ""
           - goos: linux
             goarch: amd64
+            goarm: ""
           - goos: linux
             goarch: arm64
+            goarm: ""
           - goos: linux
             goarch: riscv64
+            goarm: ""
           - goos: linux
             goarch: mips64
+            goarm: ""
           - goos: linux
             goarch: mips64le
+            goarm: ""
           - goos: linux
             goarch: arm
-            goarm: 7
-            
+            goarm: "7"
           - goos: windows
             goarch: amd64
+            goarm: ""
           - goos: windows
             goarch: arm64
+            goarm: ""
 
-    runs-on: ubuntu-latest
     env:
       GOOS: ${{ matrix.goos }}
       GOARCH: ${{ matrix.goarch }}
       GOARM: ${{ matrix.goarm }}
       CGO_ENABLED: 0
-      version: "v2.2.5"
 
     steps:
       - name: Checkout codebase
         uses: actions/checkout@v4
 
-      - name: Show workflow information
+      - name: Set build metadata
+        shell: bash
         run: |
-          export _NAME=$GOOS-$GOARCH$GOARM$GOMIPS
-          echo "GOOS: $GOOS, GOARCH: $GOARCH, GOARM: $GOARM, GOMIPS: $GOMIPS, RELEASE_NAME: $_NAME"
-          echo "ASSET_NAME=$_NAME" >> $GITHUB_ENV
-          echo "REF=${GITHUB_SHA::6}" >> $GITHUB_ENV
+          if [ "${{ github.event_name }}" = "release" ]; then
+            version="${{ github.event.release.tag_name }}"
+          else
+            version="dev-${GITHUB_SHA::7}"
+          fi
+
+          if [ "$GOOS" = "windows" ]; then
+            bin_name="CloudflareScanner.exe"
+          else
+            bin_name="CloudflareScanner"
+          fi
+
+          arch_suffix="$GOARCH"
+          if [ -n "$GOARM" ]; then
+            arch_suffix="${arch_suffix}v${GOARM}"
+          fi
+
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "BIN_NAME=$bin_name" >> "$GITHUB_ENV"
+          echo "ASSET_NAME=${GOOS}-${arch_suffix}" >> "$GITHUB_ENV"
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version-file: go.mod
           check-latest: true
 
       - name: Build CloudflareScanner
+        shell: bash
         run: |
-          go build -v -o build_assets/ -trimpath -ldflags "-s -w -X main.version=${version}" .
+          mkdir -p build_assets
+          go build -v -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "build_assets/${BIN_NAME}" .
 
-      - name: Copy ip.txt & ipv6.txt & README.md
+      - name: Copy data files and README
+        shell: bash
         run: |
-          cp ${GITHUB_WORKSPACE}/ip.txt ./build_assets/ip.txt
-          cp ${GITHUB_WORKSPACE}/ipv6.txt ./build_assets/ipv6.txt
-          cp ${GITHUB_WORKSPACE}/README.md ./build_assets/README.md
+          cp ip.txt build_assets/ip.txt
+          cp ipv6.txt build_assets/ipv6.txt
+          cp README.md build_assets/README.md
 
       - name: Create ZIP archive
         shell: bash
         run: |
-          pushd ./build_assets || exit 1
-          touch -mt $(date +%Y01010000) *
-          zip -9vr ../CloudflareScanner_${{ env.ASSET_NAME }}.zip .
-          popd || exit 1
+          cd build_assets
+          zip -9vr "../CloudflareScanner_${ASSET_NAME}.zip" .
 
-      - name: Change the name
-        run: |
-          mv ./build_assets ./CloudflareScanner_${{ env.ASSET_NAME }}
-
-      - name: Upload files to Artifacts
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: CloudflareScanner_${{ env.ASSET_NAME }}
-          path: |
-            ./CloudflareScanner_${{ env.ASSET_NAME }}/*
+          path: CloudflareScanner_${{ env.ASSET_NAME }}.zip
 
-      - name: Upload binaries to release
+      - name: Upload binary archive to release
         uses: svenstaro/upload-release-action@v2
         if: github.event_name == 'release'
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ./CloudflareScanner_${{ env.ASSET_NAME }}.zip*
+          file: CloudflareScanner_${{ env.ASSET_NAME }}.zip
           tag: ${{ github.ref }}
-          file_glob: true  
+          overwrite: true
+
+  build-android-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: 0
+
+    steps:
+      - name: Checkout codebase
+        uses: actions/checkout@v4
+
+      - name: Set build metadata
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "VERSION=${{ github.event.release.tag_name }}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=dev-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.7
+
+      - name: Build Android scanner binary and bundle assets
+        shell: bash
+        run: |
+          mkdir -p android-app/app/src/main/assets
+          GOOS=android GOARCH=arm64 go build -v -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o android-app/app/src/main/assets/cloudflare_scanner .
+          cp ip.txt android-app/app/src/main/assets/ip.txt
+          cp ipv6.txt android-app/app/src/main/assets/ipv6.txt
+
+      - name: Build APK
+        shell: bash
+        run: |
+          cd android-app
+          gradle :app:assembleDebug --no-daemon
+
+      - name: Prepare APK artifact
+        shell: bash
+        run: |
+          cp android-app/app/build/outputs/apk/debug/app-debug.apk CloudflareScanner_android_arm64_debug.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CloudflareScanner_android_arm64_debug
+          path: CloudflareScanner_android_arm64_debug.apk
+
+      - name: Upload APK to release
+        uses: svenstaro/upload-release-action@v2
+        if: github.event_name == 'release'
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: CloudflareScanner_android_arm64_debug.apk
+          tag: ${{ github.ref }}
+          overwrite: true

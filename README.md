@@ -9,6 +9,23 @@ While Cloudflare exposes all [IP segment](https://www.cloudflare.com/ips/), but 
 
 * * *
 
+### Build release artifacts with GitHub Actions
+
+This repository now builds both desktop and Android release assets automatically:
+
+1. Push a tag (for example: `v2.3.0`) and publish a GitHub Release for that tag.
+2. Workflow `.github/workflows/build.yml` runs and uploads:
+   - `CloudflareScanner_windows_amd64.zip` (contains `CloudflareScanner.exe`)
+   - `CloudflareScanner_android_arm64_debug.apk`
+   - other CLI platform archives from the build matrix
+3. Download the assets from the Release page.
+
+Android note:
+- The APK is a lightweight wrapper that runs the bundled Go scanner binary (`arm64-v8a`) and shows output on screen.
+- Because no signing secret is configured here, this workflow outputs a debug-signed APK by default.
+
+* * *
+
 ### Quick to use
 
 ### Download and run
